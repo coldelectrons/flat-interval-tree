@@ -63,59 +63,139 @@
   *
   */
 
+// TODO consider making the FIT templated on an external IntervalType,
+// then make available here different types of intervals like
+// bitfield and structs.
+//
+// Also, consider making min,max,fill all fixed a fixed size, either
+// signed or unsigned, and make certain the algorithm works properly
+// with that type.
+//
+// Since we are trying to emulate a a fixed-size array, it probably
+// SHOULD be size_t or uint32_t
 
-template <typename T, int ValueBits, int IntervalBits>
+//BEGIN_BITFIELD_TYPE( IntervalEntry_bool_u31, uint32_t )
+//ADD_BITFIELD_MEMBER( lower, 0, 31 )
+//ADD_BITFIELD_MEMBER( value, 31, 1 )
+//IntervalEntry_bool_u31( bool val, uint32_t low )
+//{
+    //value = val;
+    //lower = low;
+//}
+//bool operator<( const IntervalEntry_bool_u31& rhs ) const
+//{
+    //return lower < rhs.lower;
+//}
+//END_BITFIELD_TYPE()
+
+//BEGIN_BITFIELD_TYPE( IntervalEntry_u14_u18, uint32_t )
+//ADD_BITFIELD_MEMBER( lower, 0, 18 )
+//ADD_BITFIELD_MEMBER( value, 18, 14 )
+//IntervalEntry_u14_u18( uint32_t val, uint32_t low )
+//{
+    //value = val;
+    //lower = low;
+//}
+//bool operator<( const IntervalEntry_u14_u18& rhs ) const
+//{
+    //return lower < rhs.lower;
+//}
+//END_BITFIELD_TYPE()
+
+//union IntervalEntry_u32_u32 {
+    //uint64_t raw;
+    //struct {
+        //uint32_t value;
+        //uint32_t lower;
+    //};
+    //IntervalEntry_u32_u32( uint32_t val, uint32_t low )
+        //: value( val ), lower( low )
+    //{
+    //}
+    //bool operator<( const IntervalEntry_u32_u32& rhs ) const
+    //{
+        //return lower < rhs.lower;
+    //}
+//};
+
+template <class IntervalType>
 class FlatIntervalTree {
+    //static_assert( std::is_copy_constructible<IntervalType>::value,
+                   //"Interval entry type must be copy constructible." );
+    //static_assert( std::is_nothrow_move_constructible<IntervalType>::value &&
+                       //std::is_nothrow_move_assignable<IntervalType>::value,
+                   //"Swap may throw" );
+
    public:
-    const T min, max;
-    const T fill;
+    // the half-open bounds of this FIT, [min,max)
+    const size_t min, max;
+    // the default value for fill and sentinal values
+    const size_t fill;
 
-    BEGIN_BITFIELD_TYPE( IntervalEntry, T )
-    ADD_BITFIELD_MEMBER( lower, 0, IntervalBits )
-    ADD_BITFIELD_MEMBER( value, IntervalBits + ValueBits, ValueBits )
-    bool operator<( const IntervalEntry& rhs ) const
-    {
-        return lower < rhs.lower;
-    }
-    END_BITFIELD_TYPE()
-
-    using self_type = FlatIntervalTree<T, ValueBits, IntervalBits>;
-    using entry_type = IntervalEntry;
-    using value_type = T;
-    using tree_type = std::vector<entry_type>;
+    //
+    using self_type = FlatIntervalTree<IntervalType>;
+    using interval_type = IntervalType;
+    using tree_type = std::vector<interval_type>;
     using const_tree_iterator = typename tree_type::const_iterator;
     using tree_iterator = typename tree_type::iterator;
     using size_type = size_t;
     using difference_type = ptrdiff_t;
-    using reference = T&;
-    typedef T const_reference;
-    typedef value_type* pointer;
-    typedef const value_type* const_pointer;
-    // typedef V value_type;
-    // typedef iterator<T> iterator;
-    // typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
-    // typedef std::reverse_iterator<iterator> reverse_iterator;
+    using reference = interval_type&;
+    using const_reference = const interval_type&;
+    //
     tree_type tree;
 
-    class const_iterator {
+    struct const_iterator {
        public:
         using self_type = const_iterator;
-        using value_type = T;
+        using value_type = uint32_t;
         using size_type = size_t;
         using difference_type = ptrdiff_t;
         using iterator_category = std::input_iterator_tag;
-        using reference = T;
-        using const_reference = const T;
-        const_iterator( tree_type& tree, size_t tree_index, size_t position, size_t min,
-                        size_t max )
-            : tree(tree), i( tree_index ), pos( position ), min( min ), max( max )
+        using reference = uint32_t;
+        using const_reference = const uint32_t;
+        // normal ctor
+        const_iterator( tree_type* tree, size_t tree_index, size_t position )
+            : tree( tree ), i( tree_index ), pos( position )
+        {
+        }
+        const_iterator( const tree_type* tree, size_t tree_index,
+                        size_t position )
+            : tree( tree ), i( tree_index ), pos( position )
         {
         }
         virtual ~const_iterator() {}
+        // copy ctor
+        const_iterator( const self_type& rhs )
+            : tree( rhs.tree ), i( rhs.i ), pos( rhs.pos )
+        {
+        }
+        // move ctor
+        const_iterator( self_type&& rhs )
+            : tree( rhs.tree ), i( rhs.i ), pos( rhs.pos )
+        {
+        }
+        // copy op
+        void operator=( const self_type& rhs )
+        {
+            // is this iterator is already constructed by this FIT,
+            // then 'tree' is already assigned and valid
+            tree = rhs.tree;
+            i = rhs.i;
+            pos = rhs.pos;
+        }
+        // move op
+        self_type& operator=( self_type&& rhs )
+        {
+            tree = rhs.tree;
+            i = rhs.i;
+            pos = rhs.pos;
+            return *this;
+        }
         self_type operator++()
         {
             ++pos;
-            if ( pos >= tree[i+1]->lower ) {
+            if ( pos >= ( *tree )[i + 1].lower ) {
                 ++i;
             }
             return *this;
@@ -123,7 +203,7 @@ class FlatIntervalTree {
         self_type operator--()
         {
             --pos;
-            if ( pos < tree[i]->lower ) {
+            if ( pos < ( *tree )[i].lower ) {
                 --i;
             }
             return *this;
@@ -132,10 +212,10 @@ class FlatIntervalTree {
         {
             pos += n;
 
-            while ( pos < tree[i]->lower ) {
+            while ( pos < ( *tree )[i].lower ) {
                 --i;
             }
-            while ( pos >= tree[i + 1]->lower ) {
+            while ( pos >= ( *tree )[i + 1].lower ) {
                 ++i;
             }
 
@@ -145,36 +225,32 @@ class FlatIntervalTree {
         {
             pos -= n;
 
-            while ( pos < tree[i]->lower ) {
+            while ( pos < ( *tree )[i].lower ) {
                 --i;
             }
-            while ( pos >= tree[ i + 1 ]->lower ) {
+            while ( pos >= ( *tree )[i + 1].lower ) {
                 ++i;
             }
 
             return *this;
         }
-        const_reference operator*() { return tree[i]->value; }
-        const_reference operator->() { return tree[i]->value; }
+        const_reference operator*() { return ( *tree )[i]->value; }
+        const_reference operator->() { return ( *tree )[i]->value; }
         bool operator==( const self_type& rhs ) { return pos == rhs.pos; }
         bool operator!=( const self_type& rhs ) { return pos != rhs.pos; }
         difference_type distance( const self_type& rhs )
         {
             return rhs.pos - pos;
         }
-        T Lower() { return tree[i]->lower; }
-        T Upper() { return tree[i + 1 ]->lower; }
-        T Value() { return tree[i]->value; }
-       protected:
-        // FlatIntervalTree& fit;
-        tree_type& tree;
+        uint32_t Lower() { return ( *tree )[i].lower; }
+        uint32_t Upper() { return ( *tree )[i + 1].lower; }
+        uint32_t Value() { return ( *tree )[i].value; }
+        tree_type const* tree;
         size_t i;
         size_t pos;
-        size_t min;
-        size_t max;
     };
 
-    FlatIntervalTree( T min, T max, T fill )
+    FlatIntervalTree( uint32_t min, uint32_t max, uint32_t fill )
         : min( min ), max( max ), fill( fill )
     {
         // sentinal values
@@ -199,33 +275,62 @@ class FlatIntervalTree {
     virtual ~FlatIntervalTree() {}
     const_iterator begin() const
     {
-        const_iterator i( tree, 0, 0, min, max );
+        const_iterator i( &tree, 0, 0 );
         return i;
     }
     const_iterator end() const
     {
-        const_iterator i( tree, tree.size()-1, max, min, max );
+        const_iterator i( &tree, tree.size() - 1, max );
         return i;
     }
 
-    T at( size_t i ) const
+    /// returns the value in interval i
+    uint32_t at( size_t i ) const { return inInterval( i )->value; }
+    /// returns the value in interval i
+    uint32_t operator[]( size_t i ) const { return at( i ); }
+    /// returns the virtual number of elements
+    size_t size() const { return max - min; }
+    /// find the first point with value v.
+    const_iterator find_value( uint32_t v ) const
     {
-        return inInterval( i )->value;
+        const_iterator it = end();
+        auto vit = std::find_if(
+            tree.begin(), tree.end(),
+            [=]( const interval_type& i ) -> bool { return i.value == v; } );
+        if ( vit != tree.end() ) {
+            it.i = std::distance( tree.begin(), vit );
+            it.pos = vit->lower;
+        }
+        return it;
     }
-    T operator[]( size_t i ) const { return at( i ); }
-    // size-1 due to sentinal
-    size_t size() const { return tree.size() - 1; }
-    // find the interval [l,u) that contains the point i
-    const_iterator find( size_t i ) const
+
+    /// search for value v starting at iterator i.
+    const_iterator find_value( const_iterator sit, uint32_t v ) const
     {
-        return std::move( iterator( inInterval( i ) ) );
+        auto it = end();
+        auto vit = std::find_if(
+            tree.begin() + sit.i, tree.end(),
+            [=]( const interval_type& i ) -> bool { return i.value == v; } );
+        if ( vit != tree.end() ) {
+            it.i = std::distance( tree.begin(), vit );
+            it.pos = vit->lower;
+        }
+        return it;
+    }
+
+    /// return iterator to the interval [l,u) that contains the point i
+    const_iterator find_interval( uint32_t i ) const
+    {
+        const auto it = inInterval( i );
+        return const_iterator( &tree, std::distance( tree.begin(), it ),
+                               it->lower );
     }
 
     bool is_sorted() const
     {
         return std::is_sorted(
             tree.begin(), tree.end(),
-            []( const value_type& a, const value_type& b ) -> bool {
+            []( const interval_type& a, const interval_type& b ) -> bool {
                 return a.lower < b.lower;
             } );
     }
@@ -235,7 +340,7 @@ class FlatIntervalTree {
     {
         auto new_end = std::unique(
             tree.begin(), tree.end(),
-            []( const value_type& a, const value_type& b ) -> bool {
+            []( const interval_type& a, const interval_type& b ) -> bool {
                 return a.value == b.value;
             } );
         auto rv = std::distance( new_end, tree.end() );
@@ -245,36 +350,32 @@ class FlatIntervalTree {
 
     void reserve( size_t n ) { tree.reserve( n ); }
     size_t capacity() const { return tree.capacity(); }
-    void write( size_t position, T value )
+    void write( uint32_t position, uint32_t value )
     {
         write( position, position + 1, value );
     }
     // complexity O(2*log(n)+2n)?
     /// writes/overwrites, adhering strictly to
     /// the rule of no adjacent intervals of like value
-    void write( size_t lower, size_t upper, T value )
+    void write( const uint32_t l_, const uint32_t u_, const uint32_t value )
     {
-        if ( lower < min ) {
-            lower = min;
-        }
-        if ( upper > max ) {
-            upper = max;
-        }
+        const uint32_t lower = l_ < min ? min : l_;
+        const uint32_t upper = u_ > max ? max : u_;
         if ( lower >= upper ) {
             throw std::logic_error( "Improper interval !(lower<upper)" );
         }
 
-        auto bit = inInterval( lower );
-        auto eit = inInterval( upper );
-        auto d = std::distance( bit, eit );
-        if ( d == 0 ) {
-            ++eit;
-        }
-        auto l = bit->lower;
-        auto u = upper == max ? max : eit->lower;
-        auto bvalue = bit->value;
-        auto evalue = upper == max ? fill : eit->value;
-        auto pvalue = bit == tree.begin() ? fill : ( bit - 1 )->value;
+        const auto bit = inInterval( lower );
+        const auto tmp = inInterval( upper );
+        // if the interval we are writing exists entirely within one interval
+        // increment eit so we can access the upper bound info
+        const auto d = std::distance( bit, tmp );
+        const auto eit = d==0 ? tmp+1 : tmp;
+        const auto l = bit->lower;
+        const auto u = upper == max ? max : eit->lower;
+        const auto bvalue = bit->value;
+        const auto evalue = upper == max ? fill : eit->value;
+        const auto pvalue = bit == tree.begin() ? fill : ( bit - 1 )->value;
         // Cheap In-place Operations:
         // Try to identify cases where work need not be done
         // or elements can be modified in-place.
@@ -294,10 +395,12 @@ class FlatIntervalTree {
             // 3        [vvvvvvvv
             // 4            [vvvvvvvv
             //
-            // if value == bvalue then
+            // if our value matches the existing entry value
             //   1) NoOp
             //      done
-            // else if lower == l then
+            //
+            // if lower == l 
+            // ( our interval entry starts on the same point as the existing )
             //   if b != begin then
             //     if value == pvalue then
             //       2) GrowBeforeB
@@ -356,7 +459,7 @@ class FlatIntervalTree {
                     bit->lower = upper;
                     // use a tmp, so we only need to do 1 copy/move, not 2
                     tree_type tmp;
-                    tmp.emplace_back( u, bvalue );
+                    tmp.emplace_back( l, bvalue );
                     tmp.emplace_back( lower, value );
                     tree.insert( bit, tmp.begin(), tmp.end() );
                     return;
@@ -670,7 +773,7 @@ class FlatIntervalTree {
     }
 
     // Complexity O(2*log(n))?
-    self_type slice( size_t b, size_t e )
+    self_type slice( uint32_t b, uint32_t e )
     {
         //
         self_type rv( b, e, fill );
@@ -712,7 +815,8 @@ class FlatIntervalTree {
     }
 
     // get the range of intervals the given half-open interval overlaps
-    std::pair<iterator, iterator> overlapping_range( size_t b, size_t e )
+    std::pair<const_iterator, const_iterator> overlapping_range( uint32_t b,
+                                                                 uint32_t e )
     {
         //
         if ( b < min ) {
@@ -725,14 +829,14 @@ class FlatIntervalTree {
             throw std::logic_error( "Bad half-open interval" );
         }
 
-        return std::move( std::pair<iterator, iterator>(
+        return std::move( std::pair<const_iterator, const_iterator>(
             inInterval( b ), inInterval( e ) + 1 ) );
     }
 
    private:
     // Conduct binary search to find the highest lower bound
     // that is still lower than i.
-    tree_iterator inInterval( size_t i )
+    tree_iterator inInterval( uint32_t i )
     {
         // if ( i >= max || i < min ) {
         // throw std::out_of_range( "Cannot find i in [min,max)" );
@@ -745,11 +849,22 @@ class FlatIntervalTree {
             return tree.end() - 1;
         }
         // XXX TODO look harder at why this works
-        auto it = std::upper_bound(
-            tree.begin(), tree.end(), entry_type(),
-            [i]( const entry_type&, const entry_type& entry ) -> bool {
-                return i < entry.lower;
+        auto it = std::lower_bound(
+            tree.rbegin(), tree.rend(), interval_type( i, i ),
+            []( const interval_type& l, const interval_type& entry ) -> bool {
+                return l.lower > entry.lower;
             } );
-        return --it;
+        //assert( it != tree.rend() );
+        return it.base() - 1;
     }
 };
+
+// FlatIntervalTree<IntervalEntry_u14_u18> fit14(0,64*64*64,0);
+// FlatIntervalTree<IntervalEntry_u32_u32> fit32(0,64*64*64,0);
+
+// int main( int argc, char *argv[] )
+//{
+// fit14.is_sorted();
+// fit14.write(3162,13414,23);
+// return 0;
+//}
